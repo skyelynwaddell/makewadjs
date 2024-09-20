@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>makewadjs</title>
+
+        <!-- Bootstrap CSS -->
+        <link rel="stylesheet" href="css/bootstrap.css">
+        <!-- Custom CSS -->
+        <link rel="stylesheet" href="css/styles.css">
+        <!-- Jquery -->
+        <script src="js/jquery.js"></script>
+        <!-- Bootstrap JS -->
+        <script src="js/bootstrap.js"></script>
+        <!-- Custom JS -->
+        <script src="js/script.js"></script>
+</head>
+<body>
+
+    <h1>makewad js</h1>
+
+        <table>
+        <tr>
+          <th><label for="textures">textures</label></th>
+          <th><label for="palette">palette</label></th>
+          <th><label for="wad">output wad</label></th>
+        </tr>
+        <tr>
+          <td><input type="file" name="textures" id="textures"  webkitdirectory multiple></td>
+          <td><input type="file" name="palette" id="palette"></td>
+          <td><input type="file" name="wad" id="wad"></td>
+        </tr>
+      </table>
+
+      <button onclick="MakeWAD();">make wad</button>
+
+    </body>
+</html>

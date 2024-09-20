@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>makewadjs</title>
+</head>
+<body>
+    <button id="download">Download WAD2</button>
+
+    <script>
+        function createWAD2() {
+            //create an ArrayBuffer to hold the WAD2 file
+            const buffer = new ArrayBuffer(12 + 64 + 32); // Header (12 bytes) + Lump (64 bytes) + Directory (32 bytes)
+            const view = new DataView(buffer);
+
+            //write the WAD2 header
+            const textEncoder = new TextEncoder();
+            const wadHeader = textEncoder.encode("WAD2"); // Identifier 'WAD2'
+            for (let i = 0; i < wadHeader.length; i++) {
+                view.setUint8(i, wadHeader[i]);
+            }
+
+            view.setInt32(4, 1, true); // numLumps = 1 (little endian)
+            view.setInt32(8, 12 + 64, true); // directoryOffset = 12 + 64 (header + lump)
+
+            // write a dummy lump (64 bytes of zeros)
+            const lumpOffset = 12; // Lump starts after header
+            for (let i = 0; i < 64; i++) {
+                view.setUint8(lumpOffset + i, 0); // Dummy texture lump
+            }
+
+            //write the directory entry (32 bytes)
+            const directoryOffset = 12 + 64;
+            view.setInt32(directoryOffset, lumpOffset, true); // Lump offset
+            view.setInt32(directoryOffset + 4, 64, true); // Lump size (on disk)
+            view.setInt32(directoryOffset + 8, 64, true); // Lump size (actual)
+            view.setInt32(directoryOffset + 12, 0x40, true); // Lump type (texture)
+
+            //create a dummy texture for testing
+            const lumpName = textEncoder.encode("DUMMYTEXTURE");
+            for (let i = 0; i < lumpName.length; i++) {
+                view.setUint8(directoryOffset + 16 + i, lumpName[i]); // Lump name (up to 16 characters)
+            }
+
+            //create a blob from the ArrayBuffer and trigger a download
+            const blob = new Blob([buffer], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+
+            //trigger a download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mywad.wad';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        document.getElementById('download').addEventListener('click', createWAD2);
+    </script>
+</body>
+</html>
