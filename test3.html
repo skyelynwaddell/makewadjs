@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>makewadjs</title>
+</head>
+<body>
+    <button id="download">Download WAD2</button>
+
+    <script>
+        // Function to generate mipmaps by averaging pixel values
+        function generateMipmaps(data, baseWidth, mipLevels) {
+            const mipmaps = [];
+            let width = baseWidth;
+            let height = baseWidth; // Start with square textures
+
+            for (let level = 0; level < mipLevels; level++) {
+                mipmaps.push(new Uint8Array(width * height));
+
+                // Fill the mipmap with the data from the previous level
+                if (level > 0) {
+                    const previousLevelData = mipmaps[level - 1];
+                    const previousWidth = Math.max(1, width * 2);
+                    const previousHeight = Math.max(1, height * 2);
+
+                    for (let y = 0; y < height; y++) {
+                        for (let x = 0; x < width; x++) {
+                            // Average 2x2 pixels from the previous level
+                            const topLeft = previousLevelData[(y * 2) * previousWidth + (x * 2)];
+                            const topRight = previousLevelData[(y * 2) * previousWidth + (x * 2 + 1)];
+                            const bottomLeft = previousLevelData[(y * 2 + 1) * previousWidth + (x * 2)];
+                            const bottomRight = previousLevelData[(y * 2 + 1) * previousWidth + (x * 2 + 1)];
+
+                            mipmaps[level][y * width + x] = Math.floor((topLeft + topRight + bottomLeft + bottomRight) / 4);
+                        }
+                    }
+                }
+
+                width = Math.max(1, Math.floor(width / 2));
+                height = Math.max(1, Math.floor(height / 2));
+            }
+
+            return mipmaps;
+        }
+
+        function createWAD2() {
+
+            // Define dimensions and sizes
+            var textureWidth = 64;  
+            var textureHeight = 64; 
+            var mipLevels = 4;
+            var textureSizes = [textureWidth * textureHeight]; // Start with the base size
+
+            let currentWidth = textureWidth;
+            let currentHeight = textureHeight;
+
+            // Generate mipmap sizes
+            for (let i = 0; i < mipLevels; i++) {
+                textureSizes.push(currentWidth * currentHeight);
+                currentWidth = Math.max(1, Math.floor(currentWidth / 2));
+                currentHeight = Math.max(1, Math.floor(currentHeight / 2));
+            }
+
+            const textureLumpSize = 8 + textureSizes.reduce((a, b) => a + b, 0); // Header + mipmaps
+            const paletteLumpSize = 768; // 256 colors * 3 bytes per color
+            const directoryEntrySize = 32; // Size of a directory entry
+
+            // Create an ArrayBuffer to hold the WAD2 file
+            const buffer = new ArrayBuffer(12 + textureLumpSize + paletteLumpSize + 2 * directoryEntrySize);
+            const view = new DataView(buffer);
+
+            // Function to write a name for a texture or palette after writing it's lump
+            function writeName(lumpName, directoryOffset){
+                for (let i = 0; i < 16; i++) {
+                    if (i < lumpName.length) {
+                        view.setUint8(directoryOffset + 16 + i, lumpName[i]); // Lump name (up to 16 characters)
+                    } else {
+                        view.setUint8(directoryOffset + 16 + i, 0); // Null padding
+                    }
+                }
+            }
+
+            // Write the WAD2 header
+            const textEncoder = new TextEncoder();
+            const wadHeader = textEncoder.encode("WAD2");
+            for (let i = 0; i < wadHeader.length; i++) {
+                view.setUint8(i, wadHeader[i]);
+            }
+
+            // Number of lumps is 2 (one for texture, one for palette)
+            view.setInt32(4, 2, true); 
+            view.setInt32(8, 12 + textureLumpSize + paletteLumpSize, true); // directoryOffset
+
+            // Create a simple checkerboard pattern using two palette colors
+            const textureData = new Uint8Array(textureSizes[0]); // Define textureData
+            const color1Index = 192; // Red [192]
+            const color2Index = 0;   // Black [0]
+
+            for (let y = 0; y < textureHeight; y++) {
+                for (let x = 0; x < textureWidth; x++) {
+                    textureData[y * textureWidth + x] = (x + y) % 2 === 0 ? color1Index : color2Index;
+                }
+            }
+
+            // Generate mipmaps
+            const mipmaps = [textureData, ...generateMipmaps(textureData, textureWidth, mipLevels)];
+
+            // Write the texture lump data
+            const textureLumpOffset = 12; // Start after the header
+            let offset = textureLumpOffset;
+
+            view.setInt32(offset, textureWidth, true); // Set width
+            view.setInt32(offset + 4, textureHeight, true); // Set height
+
+            // Write the pixel data for each mipmap
+            offset += 8;
+            mipmaps.forEach(mipmap => {
+                for (let i = 0; i < mipmap.length; i++) {
+                    view.setUint8(offset++, mipmap[i]);
+                }
+            });
+
+            // Write the palette lump data (made a simple test color palette)
+            const paletteLumpOffset = textureLumpOffset + textureLumpSize; // Start after texture lump
+            generatePalette(view,paletteLumpOffset)
+
+            // Write directory entries
+            const directoryOffset = 12 + textureLumpSize + paletteLumpSize; // Start after all lumps
+
+            const LUMPTYPE = {
+                PALETTE     : 0x40, //Color Palette
+                STATUS_BAR  : 0x42, //Pictures for status bar
+                TEXTURE     : 0x44, //Used to be Mip Texture
+                FLAT        : 0x45, //Console picture (flat)
+            } 
+
+            /// Create Lump Function
+            //int LUMP_OFFSET
+            //int LUMP_SIZE 
+            //int TEXTURE_SIZE
+            //hex LUMP_TYPE
+            //string LUMP_NAME
+
+            function createLump(LUMP_OFFSET, LUMP_SIZE, TEXTURE_SIZE, LUMP_TYPE, LUMP_NAME, directoryOffset){
+                view.setInt32(directoryOffset, LUMP_OFFSET, true);       // Lump offset
+                view.setInt32(directoryOffset + 4, LUMP_SIZE, true);     // Lump size (on disk)
+                view.setInt32(directoryOffset + 8, TEXTURE_SIZE, true);  // Lump size (in memory)
+                view.setUint8(directoryOffset + 12, LUMP_TYPE);          // Lump type
+                view.setUint8(directoryOffset + 13, 0);                  // Compression (0 = none)
+                view.setInt16(directoryOffset + 14, 0, true);            // Dummy (not used)
+                const lumpName = textEncoder.encode(LUMP_NAME);
+                writeName(lumpName, directoryOffset);
+            }
+
+            createLump(textureLumpOffset, textureLumpSize, textureLumpSize, LUMPTYPE.TEXTURE, "TEXTURE", directoryOffset);
+
+            // Create a lump for palette
+            createLump(paletteLumpOffset, paletteLumpSize, paletteLumpSize, LUMPTYPE.PALETTE, "PALETTE", directoryOffset + directoryEntrySize);
+
+            // Create a blob from the ArrayBuffer and trigger a download
+            const blob = new Blob([buffer], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+
+            // Trigger a download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mywad.wad';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url); // Clean up the URL object
+        }
+
+        document.getElementById('download').addEventListener('click', createWAD2);
+
+        function generatePalette(view, paletteLumpOffset) {
+            let index = 0;
+
+            // Grayscale ramp (0-31)
+            for (let i = 0; i < 32; i++) {
+                const gray = Math.floor(i * 255 / 31);  // Scale from 0 to 255
+                view.setUint8(paletteLumpOffset + index * 3, gray);    // R
+                view.setUint8(paletteLumpOffset + index * 3 + 1, gray);  // G
+                view.setUint8(paletteLumpOffset + index * 3 + 2, gray);  // B
+                index++;
+            }
+
+            // Brownish ramp (32-47)
+            for (let i = 0; i < 16; i++) {
+                const r = 109 - Math.floor(i * 5.75); // Decrease R
+                const g = 70 - Math.floor(i * 4.375); // Decrease G
+                const b = 47 - Math.floor(i * 2.9375); // Decrease B
+                view.setUint8(paletteLumpOffset + index * 3, r); // R
+                view.setUint8(paletteLumpOffset + index * 3 + 1, g); // G
+                view.setUint8(paletteLumpOffset + index * 3 + 2, b); // B
+                index++;
+            }
+
+            // Red to yellow ramp (48-63)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 255);      // R stays max
+                view.setUint8(paletteLumpOffset + index * 3 + 1, Math.floor(i * 255 / 15));  // G increases
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 0);  // B stays 0
+                index++;
+            }
+
+            // Yellow to Green ramp (64-79)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 255 - Math.floor(i * 255 / 15));  // R decreases
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 255);  // G stays max
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 0);    // B stays 0
+                index++;
+            }
+
+            // Green to Cyan ramp (80-95)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 0);  // R stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 255);  // G stays max
+                view.setUint8(paletteLumpOffset + index * 3 + 2, Math.floor(i * 255 / 15));  // B increases
+                index++;
+            }
+
+            // Cyan to Blue ramp (96-111)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 0);  // R stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 255 - Math.floor(i * 255 / 15));  // G decreases
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 255);  // B stays max
+                index++;
+            }
+
+            // Blue to Purple ramp (112-127)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, Math.floor(i * 128 / 15));  // R increases
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 0);  // G stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 255);  // B stays max
+                index++;
+            }
+
+            // Pinkish tones (128-143)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 255);  // R stays max
+                view.setUint8(paletteLumpOffset + index * 3 + 1, Math.floor(i * 128 / 15));  // G increases
+                view.setUint8(paletteLumpOffset + index * 3 + 2, Math.floor(i * 255 / 15));  // B increases
+                index++;
+            }
+
+            // Dark tones (144-159)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, Math.floor(i * 128 / 15));  // R increases slowly
+                view.setUint8(paletteLumpOffset + index * 3 + 1, Math.floor(i * 64 / 15));  // G increases slowly
+                view.setUint8(paletteLumpOffset + index * 3 + 2, Math.floor(i * 32 / 15));  // B increases slowly
+                index++;
+            }
+
+            // Purple to red shades (160-191)
+            for (let i = 0; i < 32; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 128 + Math.floor(i * 127 / 31));  // R increases
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 0);  // G stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 128 + Math.floor(i * 127 / 31));  // B increases
+                index++;
+            }
+
+            // *** Filling in Colors 192-255 ***
+
+            // Blood Red to Dark Red (192-207)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, 128 + Math.floor(i * 127 / 15));  // R increases to bright red
+                view.setUint8(paletteLumpOffset + index * 3 + 1, 0);  // G stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 2, 0);  // B stays 0 (pure red shades)
+                index++;
+            }
+
+            // Fire (208-223)
+            for (let i = 0; i < 16; i++) {
+                const r = 255;
+                const g = Math.floor(i * 180 / 15);  // G increases from dark to bright
+                const b = 0;  // B stays 0
+                view.setUint8(paletteLumpOffset + index * 3, r);  // R stays max
+                view.setUint8(paletteLumpOffset + index * 3 + 1, g);  // G increases
+                view.setUint8(paletteLumpOffset + index * 3 + 2, b);  // B stays 0
+                index++;
+            }
+
+            // Dark Greenish Tones (224-239)
+            for (let i = 0; i < 16; i++) {
+                view.setUint8(paletteLumpOffset + index * 3, Math.floor(i * 64 / 15));  // R increases slightly
+                view.setUint8(paletteLumpOffset + index * 3 + 1, Math.floor(i * 192 / 15));  // G increases more
+                view.setUint8(paletteLumpOffset + index * 3 + 2, Math.floor(i * 32 / 15));  // B increases slightly
+                index++;
+            }
+
+            // Dark Purple to Blue (240-255)
+            for (let i = 0; i < 16; i++) {
+                const r = Math.floor(i * 128 / 15);  // R increases slowly
+                const g = 0;  // G stays 0
+                const b = 255 - Math.floor(i * 127 / 15);  // B decreases from bright to darker blue
+                view.setUint8(paletteLumpOffset + index * 3, r);  // R increases
+                view.setUint8(paletteLumpOffset + index * 3 + 1, g);  // G stays 0
+                view.setUint8(paletteLumpOffset + index * 3 + 2, b);  // B decreases
+                index++;
+            }
+        }
+
+
+    </script>
+</body>
+</html>

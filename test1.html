@@ -11,7 +11,13 @@
     <script>
         function createWAD2() {
             //create an ArrayBuffer to hold the WAD2 file
-            const buffer = new ArrayBuffer(12 + 64 + 32); // Header (12 bytes) + Lump (64 bytes) + Directory (32 bytes)
+            const textureWidth = 8;  // Set width of the texture
+            const textureHeight = 8; // Set height of the texture
+            const textureSize = textureWidth * textureHeight; // Total pixels
+            const lumpSize = 64;
+            const directoryEntrySize = 32;
+
+            const buffer = new ArrayBuffer(12 + lumpSize + directoryEntrySize); // Header (12 bytes) + Lump (64 bytes) + Directory (32 bytes)
             const view = new DataView(buffer);
 
             //write the WAD2 header
@@ -21,42 +27,63 @@
                 view.setUint8(i, wadHeader[i]);
             }
 
-            view.setInt32(4, 1, true); // numLumps = 1 (little endian)
-            view.setInt32(8, 12 + 64, true); // directoryOffset = 12 + 64 (header + lump)
+            view.setInt32(4, 1, true); // numLumps = 1 (little endian) //Number of entries
+            view.setInt32(8, 12 + lumpSize, true); // directoryOffset = 12 + 64 (header + lump) //Position of WAD directory in file
 
-            // write a dummy lump (64 bytes of zeros)
-            const lumpOffset = 12; // Lump starts after header
-            for (let i = 0; i < 64; i++) {
-                view.setUint8(lumpOffset + i, 0); // Dummy texture lump
+            // Define a simple texture (checkerboard pattern)
+            const textureData = new Uint8Array(textureSize);
+            for (let y = 0; y < textureHeight; y++) {
+                for (let x = 0; x < textureWidth; x++) {
+                    textureData[y * textureWidth + x] = (x + y) % 2; // Use 0 and 1 for a simple checkerboard pattern
+                }
             }
 
-            //write the directory entry (32 bytes)
-            const directoryOffset = 12 + 64;
-            view.setInt32(directoryOffset, lumpOffset, true); // Lump offset
-            view.setInt32(directoryOffset + 4, 64, true); // Lump size (on disk)
-            view.setInt32(directoryOffset + 8, 64, true); // Lump size (actual)
-            view.setInt32(directoryOffset + 12, 0x40, true); // Lump type (texture)
+            // Write the texture data (lump)
+            const lumpOffset = 12; // Lump starts after header
+            view.setInt32(lumpOffset, textureWidth, true); // Set texture width
+            view.setInt32(lumpOffset + 4, textureHeight, true); // Set texture height
+            for (let i = 0; i < textureSize; i++) {
+                view.setUint8(lumpOffset + 8 + i, textureData[i]); // Set texture pixel data
+            }
 
-            //create a dummy texture for testing
+
+            // Write the directory entry (32 bytes)
+            const directoryOffset = 12 + lumpSize; // Directory starts after lump
+            view.setInt32(directoryOffset, lumpOffset, true); // Lump offset
+            view.setInt32(directoryOffset + 4, 8 + textureSize, true); // Lump size (actual on disk)
+            view.setInt32(directoryOffset + 8, textureSize, true); // Lump size (in memory)
+            view.setUint8(directoryOffset + 12, 0x44); // Lump type (0x40 = color palette, adjust as necessary)
+            view.setUint8(directoryOffset + 13, 0); // Compression (0 = none)
+            view.setInt16(directoryOffset + 14, 0, true); // Dummy (not used)
+
+
+            // Create a lump name (padded to 16 bytes)
             const lumpName = textEncoder.encode("DUMMYTEXTURE");
-            for (let i = 0; i < lumpName.length; i++) {
-                view.setUint8(directoryOffset + 16 + i, lumpName[i]); // Lump name (up to 16 characters)
+            for (let i = 0; i < 16; i++) {
+                if (i < lumpName.length) {
+                    view.setUint8(directoryOffset + 16 + i, lumpName[i]); // Lump name (up to 16 characters)
+                } else {
+                    view.setUint8(directoryOffset + 16 + i, 0); // Null padding
+                }
             }
 
             //create a blob from the ArrayBuffer and trigger a download
             const blob = new Blob([buffer], { type: 'application/octet-stream' });
             const url = URL.createObjectURL(blob);
 
-            //trigger a download
+            // Trigger a download
             const a = document.createElement('a');
             a.href = url;
             a.download = 'mywad.wad';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            URL.revokeObjectURL(url); // Clean up the URL object
         }
 
         document.getElementById('download').addEventListener('click', createWAD2);
+
+        
     </script>
 </body>
 </html>
